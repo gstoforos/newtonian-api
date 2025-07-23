@@ -1,35 +1,39 @@
 import numpy as np
-from sklearn.linear_model import LinearRegression
+from scipy.optimize import curve_fit
+from sklearn.metrics import r2_score
 
-def fit_newtonian(data):
-    shear_rates = np.array(data.get("shear_rates", []))
-    shear_stresses = np.array(data.get("shear_stresses", []))
+def fit_newtonian(shear_rates, shear_stresses, flow_rate, diameter, density, re_critical=4000):
+    def model(gamma_dot, mu):
+        return mu * gamma_dot
 
-    if len(shear_rates) != len(shear_stresses) or len(shear_rates) < 2:
-        return {"error": "Invalid or insufficient shear data."}
+    popt, _ = curve_fit(model, shear_rates, shear_stresses)
+    mu_app = popt[0]
 
-    model = LinearRegression()
-    model.fit(shear_rates.reshape(-1, 1), shear_stresses)
+    predicted = model(np.array(shear_rates), *popt)
+    r2 = r2_score(shear_stresses, predicted)
 
-    mu = model.coef_[0]
-    r_squared = model.score(shear_rates.reshape(-1, 1), shear_stresses)
+    # Newtonian-specific values
+    tau0 = 0.0
+    k = mu_app
+    n = 1.0
 
-    flow_rate = float(data.get("flow_rate", 0))
-    diameter = float(data.get("pipe_diameter", 0))
-    density = float(data.get("density", 0))
+    # Calculate Reynolds number
+    velocity = flow_rate / (np.pi * (diameter / 2) ** 2)
+    re = (density * velocity * diameter) / mu_app
 
-    if flow_rate > 0 and diameter > 0 and density > 0:
-        Q = flow_rate
-        D = diameter
-        rho = density
-        Re = (4 * rho * Q) / (np.pi * D * mu)
-    else:
-        Re = None
+    # Calculate q_critical (flow rate below which flow is laminar)
+    q_critical = (np.pi * diameter**2 / 4) * ((re_critical * mu_app) / (density * diameter))
+
+    equation = f"τ = {mu_app:.3f}·γ̇"
 
     return {
-        "model": "Newtonian",
-        "mu": mu,
-        "r_squared": r_squared,
-        "reynolds": Re
+        "equation": equation,
+        "tau0": tau0,
+        "k": k,
+        "n": n,
+        "r2": r2,
+        "mu_app": mu_app,
+        "re": re,
+        "re_critical": re_critical,
+        "q_critical": q_critical
     }
-
